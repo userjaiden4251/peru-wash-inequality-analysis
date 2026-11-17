@@ -1,0 +1,333 @@
+---
+title: "firstXprojectPERU"
+author: 'userjaiden4251'
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+```{r}
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(skimr)
+
+
+jmp_raw <- read_excel(
+  "data/raw/JMP_2025_PER_Peru.xlsx",
+  sheet = "Estimates",
+  skip = 3
+)
+```
+
+
+
+
+
+```{r}
+jmp_clean <- jmp_raw %>%
+  clean_names() %>%
+  remove_empty(which = c("rows", "cols")) %>%
+  filter(!is.na(pais)) 
+
+glimpse(jmp_clean)
+head(jmp_clean)
+dim(jmp_clean)
+names(jmp_clean)
+```
+
+
+
+```{r}
+missing_summary <- jmp_clean %>%
+  summarise(across(
+    everything(),
+    ~ sum(is.na(.))
+  )) %>%
+  pivot_longer(
+    everything(),
+    names_to = "variable",
+    values_to = "missing_count"
+  ) %>%
+  mutate(
+    missing_percent = missing_count / nrow(jmp_clean) * 100
+  )
+
+print(missing_summary)
+```
+
+```{r}
+skim(jmp_clean)
+sum(duplicated(jmp_clean))
+
+
+dir.create("jmp_clean/processed",
+           recursive = TRUE,
+           showWarnings = FALSE)
+
+write_csv(jmp_clean, "jmp_clean/processed/jmp_estimates_clean.csv")
+```
+
+```{r}
+
+
+Fyears_jmp_clean<-  jmp_clean %>% 
+ filter(ano >= 2000, ano <= 2024) %>%
+  arrange(ano)
+
+Fyears_jmp_clean
+
+
+```
+
+```{r}
+urban_rural_data <- Fyears_jmp_clean %>%
+  filter(entorno != "Total")
+
+
+names(urban_rural_data)
+```
+
+
+```{r}
+library(dplyr)
+urban_rural_data %>%
+  group_by(ano) %>%
+  summarise(
+    total_rows = n(),
+    distinct_areas = n_distinct(entorno),
+    areas = paste(entorno, collapse = ", ")
+  ) %>%
+  filter(total_rows != 2 | distinct_areas != 2)
+
+
+
+all(table(urban_rural_data$ano, urban_rural_data$entorno) == 1)
+
+```
+
+
+
+
+
+
+
+
+
+```{r}
+# 1. How many observations?
+dim(urban_rural_data)
+
+# 3. What years are included?
+sort(unique(urban_rural_data$ano))
+
+# 4. What categories exist?
+unique(urban_rural_data$entorno)
+
+
+summary(urban_rural_data$agua_potable_gestionado_de_manera_segura)
+
+summary(urban_rural_data$saneamiento_gestionado_de_manera_segura)
+
+summary(urban_rural_data$disponible_cuando_se_necesita)
+
+summary(urban_rural_data$libre_de_contaminacion)
+```
+
+```{r}
+urban_rural_data <- urban_rural_data %>%
+  select(
+    pais,
+    ano,
+    entorno,
+    poblacion_1000s_fuente_division_de_poblacion_de_las_naciones_unidas, 
+    agua_potable_gestionado_de_manera_segura,
+    agua_mejorada,
+    saneamiento_gestionado_de_manera_segura,
+    saneamiento_mejorado,
+    basico_instalacion_con_agua_y_jabon,
+    disponible_cuando_se_necesita,
+    libre_de_contaminacion
+  )
+
+head(urban_rural_data)
+```
+
+```{r}
+urban_rural_data %>%
+  select(
+    ano,
+    entorno,
+    agua_potable_gestionado_de_manera_segura,
+    saneamiento_gestionado_de_manera_segura
+  ) 
+head(urban_rural_data)
+```
+
+
+
+```{r}
+urban_rural_gap <- urban_rural_data %>%
+  group_by(ano) %>%
+  summarise(
+    urban_water = agua_potable_gestionado_de_manera_segura[
+      entorno == "Urbano"
+    ],
+    rural_water = agua_potable_gestionado_de_manera_segura[
+      entorno == "Rural"
+    ],
+    water_gap = urban_water - rural_water
+  )
+
+head(urban_rural_gap)
+```
+
+```{r}
+
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+
+# Reshape data for visualization
+water_trends <- urban_rural_gap %>%
+  select(ano, urban_water, rural_water) %>%
+  pivot_longer(
+    cols = c(urban_water, rural_water),
+    names_to = "setting",
+    values_to = "water_access"
+  ) %>%
+  mutate(
+    setting = recode(
+      setting,
+      urban_water = "Urban",
+      rural_water = "Rural"
+    )
+  )
+
+ggplot(water_trends,
+       aes(x = ano, y = water_access, color = setting)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2) +
+  labs(
+    title = "Safely Managed Drinking Water Access in Peru",
+    subtitle = "Urban vs. Rural Populations, 2000–2024",
+    x = "Year",
+    y = "Population with Access (%)",
+    color = "Settlement"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+
+```
+
+
+
+```{r}
+
+ggplot(urban_rural_gap,
+       aes(x = ano, y = water_gap)) +
+  geom_line(color = "steelblue", linewidth = 1.2) +
+  geom_point(color = "steelblue", size = 2) +
+  labs(
+    title = "The Urban–Rural Drinking Water Gap in Peru",
+    subtitle = "Difference in safely managed drinking water access",
+    x = "Year",
+    y = "Urban–Rural Gap (Percentage Points)"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold")
+  )
+
+```
+
+```{r}
+
+
+urban_rural_gap %>%
+  filter(ano %in% c(2000, 2024)) %>%
+  select(ano, urban_water, rural_water, water_gap) %>%
+  pivot_longer(
+    cols = c(urban_water, rural_water, water_gap),
+    names_to = "metric",
+    values_to = "value"
+  ) %>%
+  mutate(
+    metric = recode(
+      metric,
+      "urban_water" = "Urban Water (%)",
+      "rural_water" = "Rural Water (%)",
+      "water_gap"   = "Water Gap (pp)"
+    ),
+    # Keep a logical left-to-right order
+    metric = factor(metric, levels = c("Urban Water (%)", "Rural Water (%)", "Water Gap (pp)"))
+  ) %>%
+  ggplot(aes(x = metric, y = value, fill = factor(ano))) +
+  geom_col(position = position_dodge(width = 0.75), width = 0.65) +
+  geom_text(
+    aes(label = round(value, 1)),
+    position = position_dodge(width = 0.75),
+    vjust = -0.5,
+    size = 3.8,
+    fontface = "bold"
+  ) +
+  scale_fill_manual(values = c("2000" = "#94a3b8", "2024" = "#0284c7")) +
+  scale_y_continuous(limits = c(0, 100)) +
+  labs(
+    title = "Safely Managed Drinking Water & Urban–Rural Gap (2000 vs. 2024)",
+    x = NULL,
+    y = "Percentage (%) / Percentage Points (pp)",
+    fill = "Year"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(panel.grid.major.x = element_blank())
+```
+
+
+
+
+```{r}
+urban_rural_gap %>%
+  filter(ano == 2000) %>%
+  select(ano, urban_water, rural_water, water_gap)
+
+
+urban_rural_gap %>%
+  filter(ano == 2024) %>%
+  select(ano, urban_water, rural_water, water_gap)
+```
+
+
+
+#a few notes: 
+#The variable I am analyzing is “agua_potable_gestionado_de_manera_segura”, corresponding to the JMP indicator Safely managed drinking water services. World Bank identifies teh criteria for this varibale to be: The percetnage of people using drinking water from an improved source that is accessible on premises, water is available when needed and free from fecal and priority chemical contamination.
+
+
+# Indicator: Safely managed drinking water services
+# Unit: Percentage of population (%)
+# Source: WHO/UNICEF Joint Monitoring Programme (JMP)
+
+#2020
+#* 56.4% of the urban population had safely managed drinking water services in 2000.
+#* 14.1% of the rural population had safely managed drinking water services in 2000.
+#These are percentages, so your gap of 42.3 is measured in percentage points.
+
+#2024
+#* 56.2% of the urban population had safely managed drinking water services in 2024.
+#* 23.6% of the rural population had safely managed drinking water services in 2024.
+#These are percentages, so your gap of 32.6 is measured in percentage points.
+
+
+#The variable agua_potable_gestionado_de_manera_segura represents the percentage of the population using safely managed drinking water services, not the percentage of households.
+
+ 
+#I am covering an inclusive 25 year period with this project, from 2000-2024. Something to note is that JMP values are generally statistical estimates, not 25 separate direct observations from household surveys. The JMP publishes annual estimates using information collected from national household surveys, censuses, and administrative records. It uses statistical methods to fill gaps between available data points.
+
+
+
+
+
+
+
+
